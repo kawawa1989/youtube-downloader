@@ -1,5 +1,8 @@
 .venv/
-downloads/
 __pycache__/
 *.pyc
 .DS_Store
+
+# ダウンロードした音声は追跡しないが、保存先ディレクトリ自体は残す
+downloads/*
+!downloads/.gitkeep

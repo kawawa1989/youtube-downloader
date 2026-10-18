@@ -22,6 +22,12 @@ pip install -r requirements.txt
 
 ## 使い方
 
+手順を順に追った詳しい説明は [docs/usage.md](docs/usage.md) にあります。
+
+**プロジェクトルートから実行してください。** 別のディレクトリからは
+`No module named ytmp3` になります。また URL は `&` を含むことがあるため、
+ダブルクォートで囲んでください。
+
 ```bash
 # 単一動画を mp3 にする（既定: 192kbps、downloads/ に保存）
 python -m ytmp3 "https://www.youtube.com/watch?v=..."
@@ -63,6 +69,8 @@ python -m ytmp3 -f failed.txt
 
 ## 動作の約束事
 
+- **保存先**: 指定しなければプロジェクト直下の `downloads/` に保存します。
+  このディレクトリの中身は git の追跡対象外です。
 - **ファイル名**: 動画タイトルをそのまま使います。macOS で扱いづらい `/` と `:` は全角へ置換し、
   150 文字で切り詰めます。日本語はそのまま残ります。
 - **重複**: 保存先に同名の mp3 が既にあるとスキップします。上書きしたい場合は `--force` を使います。
@@ -85,7 +93,11 @@ pytest
 
 - **取得に失敗する**: まず `pip install -U yt-dlp` を試してください。YouTube 側の変更に
   yt-dlp が追従していないことが原因の大半です。本ツールは yt-dlp が半年以上古い場合に警告を出します。
+- **`No supported JavaScript runtime could be found`**: yt-dlp が YouTube の解析に
+  JavaScript ランタイムを使うようになったためです。警告だけで動作しますが、一部のフォーマットが
+  取得できない場合があります。解消するには `brew install deno` を実行してください。
 - **`ffmpeg が見つかりません`**: `brew install ffmpeg` を実行してください。
+- **`No module named ytmp3`**: プロジェクトルート以外から実行しています。
 - **途中で中断した**: `Ctrl+C` で止めた場合、`.part` などの一時ファイルは自動的に削除されます。
 
 ## 利用上の注意
