@@ -109,6 +109,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _warn(*args: object) -> None:
+    """標準出力を吐き出してから標準エラーへ書く。
+
+    パイプへ出力する場合、標準出力はブロックバッファされるため、
+    先に flush しないと結果行とエラー行の順序が入れ替わる。
+    """
+    sys.stdout.flush()
+    print(*args, file=sys.stderr)
+    sys.stderr.flush()
+
+
 def read_url_file(path: str) -> list[str]:
     """URL リストのファイルを読み込む。空行と # で始まる行は無視する。"""
     urls = []
@@ -132,10 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             urls.extend(read_url_file(args.file))
         except OSError as exc:
-            print(
-                f"エラー: URL リストを読み込めません: {args.file} ({exc.strerror})",
-                file=sys.stderr,
-            )
+            _warn(f"エラー: URL リストを読み込めません: {args.file} ({exc.strerror})")
             return EXIT_FAILED
     if not urls:
         parser.error("URL または -f/--file のいずれかを指定してください")
@@ -147,17 +155,17 @@ def main(argv: list[str] | None = None) -> int:
         return _run_dry_run(urls, outdir, args)
 
     if shutil.which("ffmpeg") is None:
-        print("エラー: ffmpeg が見つかりません。mp3 への変換に必要です。", file=sys.stderr)
-        print("導入方法: brew install ffmpeg", file=sys.stderr)
+        _warn("エラー: ffmpeg が見つかりません。mp3 への変換に必要です。")
+        _warn("導入方法: brew install ffmpeg")
         return EXIT_FAILED
 
     warning = stale_version_warning()
     if warning and not args.quiet:
-        print(warning, file=sys.stderr)
+        _warn(warning)
 
     problem = _ensure_writable(outdir)
     if problem is not None:
-        print(problem, file=sys.stderr)
+        _warn(problem)
         return EXIT_FAILED
 
     try:
@@ -165,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         removed = cleanup_partials(outdir)
         suffix = f" (一時ファイル {removed} 件を削除しました)" if removed else ""
-        print(f"\n中断しました{suffix}", file=sys.stderr)
+        _warn(f"\n中断しました{suffix}")
         return EXIT_INTERRUPTED
 
     _report_summary(summary)
@@ -201,7 +209,7 @@ def _run_dry_run(urls: list[str], outdir: str, args: argparse.Namespace) -> int:
                 quiet=args.quiet,
             )
         except Exception as exc:
-            print(classify_error(exc, url).describe(), file=sys.stderr)
+            _warn(classify_error(exc, url).describe())
             continue
         for item in items:
             print(f"{item.title}  [{format_duration(item.duration)}]")
@@ -245,7 +253,7 @@ def _run_downloads(urls: list[str], outdir: str, args: argparse.Namespace) -> Ru
             error = classify_error(exc, url)
             summary.failures.append(error)
             cleanup_partials(outdir)
-            print(error.describe(), file=sys.stderr)
+            _warn(error.describe())
             continue
 
         for result in results:
@@ -269,9 +277,9 @@ def _report_summary(summary: RunSummary) -> None:
         f"スキップ {summary.skipped}件 / 失敗 {len(summary.failures)}件"
     )
     if summary.failures:
-        print("失敗した URL:", file=sys.stderr)
+        _warn("失敗した URL:")
         for error in summary.failures:
-            print(f"  {error.url}: {error.summary}", file=sys.stderr)
+            _warn(f"  {error.url}: {error.summary}")
 
 
 def _write_failed_urls(summary: RunSummary, path: str) -> None:
@@ -283,7 +291,7 @@ def _write_failed_urls(summary: RunSummary, path: str) -> None:
             for error in summary.failures:
                 handle.write(f"# {error.summary}\n{error.url}\n")
     except OSError as exc:
-        print(f"エラー: 失敗 URL を書き出せません: {target} ({exc.strerror})", file=sys.stderr)
+        _warn(f"エラー: 失敗 URL を書き出せません: {target} ({exc.strerror})")
         return
     print(f"失敗した URL を書き出しました: {target}")
 

@@ -145,8 +145,11 @@ class _Logger:
         pass
 
     def warning(self, message: str) -> None:
-        if not self.quiet:
-            print(message, file=sys.stderr)
+        if self.quiet:
+            return
+        # logger を差し替えると yt-dlp が接頭辞を付けないため、ここで補う
+        text = message if message.startswith("WARNING:") else f"WARNING: {message}"
+        print(text, file=sys.stderr)
 
     def error(self, message: str) -> None:
         pass
