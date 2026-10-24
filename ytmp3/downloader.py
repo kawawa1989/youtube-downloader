@@ -325,6 +325,9 @@ def build_options(
         "format": "bestaudio/best",
         "noplaylist": not playlist,
         "writethumbnail": True,
+        # プレイリスト自身のサムネイルや infojson は出力先に残さない。
+        # 既定では <プレイリストID>.jpg が書き出されてしまう。
+        "allow_playlist_files": False,
         "postprocessors": postprocessors,
         "retries": RETRIES,
         "fragment_retries": RETRIES,

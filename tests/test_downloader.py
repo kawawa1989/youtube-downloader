@@ -542,3 +542,9 @@ def test_guard_message_names_the_flag_to_use():
     )
     assert "--playlist" in error.describe()
     assert "https://x/list" in error.describe()
+
+
+def test_playlist_metafiles_are_not_written():
+    """プレイリスト自身のサムネイルが出力先に残らないようにする。"""
+    assert downloader.build_options()["allow_playlist_files"] is False
+    assert downloader.build_options(playlist=True)["allow_playlist_files"] is False
