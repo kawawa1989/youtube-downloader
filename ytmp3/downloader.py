@@ -38,6 +38,11 @@ STALE_AFTER_DAYS = 180
 # FFmpegMetadata は値が空のフィールドをタグへ書き込まない。
 EMPTY_CAPTURE = "(?P<{}>)"
 
+# プレイリスト時の album の決め方。outtmpl の代替指定で album を優先し、
+# album を持つ動画の値は保つ。どちらも無い場合は末尾の | で空文字になるため、
+# 代入側の正規表現が一致せず info は書き換えられない。
+ALBUM_TEMPLATE = "%(album,playlist_title|)s"
+
 UPDATE_HINT = "yt-dlp の更新が必要かもしれません: pip install -U yt-dlp"
 
 # エラーメッセージの断片と、利用者向けの説明の対応表。上から順に判定する。
@@ -192,9 +197,9 @@ def build_options(
         (MetadataParserPP.interpretter, "description", EMPTY_CAPTURE.format("description")),
     ]
     if playlist:
-        # album が無い動画では、プレイリスト名をアルバム名として扱う
+        # album を持たない動画に限り、プレイリスト名をアルバム名として補う
         parser_actions.append(
-            (MetadataParserPP.interpretter, "playlist_title", "(?P<album>.+)")
+            (MetadataParserPP.interpretter, ALBUM_TEMPLATE, "(?P<album>.+)")
         )
 
     postprocessors: list[dict[str, Any]] = [

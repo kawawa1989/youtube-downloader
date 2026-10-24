@@ -59,9 +59,50 @@ def test_description_is_blanked_in_playlist_mode_too():
     assert ("description", "(?P<description>)") in _parser_actions(playlist=True)
 
 
-def test_album_is_taken_from_playlist_title_only_in_playlist_mode():
-    assert ("playlist_title", "(?P<album>.+)") in _parser_actions(playlist=True)
-    assert ("playlist_title", "(?P<album>.+)") not in _parser_actions()
+def test_album_is_filled_from_playlist_title_only_in_playlist_mode():
+    assert (downloader.ALBUM_TEMPLATE, "(?P<album>.+)") in _parser_actions(playlist=True)
+    assert (downloader.ALBUM_TEMPLATE, "(?P<album>.+)") not in _parser_actions()
+
+
+def _run_metadata_parser(info: dict, playlist: bool = False) -> dict:
+    """build_options が組み立てた MetadataParser を、実際に info へ適用する。
+
+    設定の形ではなく挙動そのものを確かめるための補助。ネットワークには接続しない。
+    """
+    from yt_dlp import YoutubeDL
+    from yt_dlp.postprocessor import MetadataParserPP
+
+    actions = downloader.build_options(playlist=playlist)["postprocessors"][0]["actions"]
+    parser = MetadataParserPP(YoutubeDL({"quiet": True, "no_warnings": True}), actions)
+    parser.run(info)
+    return info
+
+
+def test_existing_album_is_kept_in_playlist_mode():
+    info = _run_metadata_parser(
+        {"album": "公式アルバム", "playlist_title": "マイリスト"}, playlist=True
+    )
+    assert info["album"] == "公式アルバム"
+
+
+def test_playlist_title_fills_a_missing_album():
+    info = _run_metadata_parser({"playlist_title": "マイリスト"}, playlist=True)
+    assert info["album"] == "マイリスト"
+
+
+def test_album_is_left_alone_when_neither_field_exists():
+    info = _run_metadata_parser({}, playlist=True)
+    assert info.get("album") in (None, "")
+
+
+def test_album_is_untouched_in_single_video_mode():
+    info = _run_metadata_parser({"playlist_title": "マイリスト"})
+    assert "album" not in info
+
+
+def test_description_is_emptied_by_the_parser():
+    info = _run_metadata_parser({"description": "長い説明文" * 50})
+    assert info["description"] == ""
 
 
 def test_empty_capture_matches_any_value_and_yields_an_empty_string():
