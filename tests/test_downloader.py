@@ -13,11 +13,16 @@ from ytmp3 import cli, downloader
 # --- build_options ---------------------------------------------------------
 
 
+def _postprocessor(key: str, **kwargs) -> dict:
+    """指定したキーの postprocessor 設定を返す。並び順には依存しない。"""
+    for pp in downloader.build_options(**kwargs)["postprocessors"]:
+        if pp["key"] == key:
+            return pp
+    raise AssertionError(f"postprocessor {key} が見つかりません")
+
+
 def test_bitrate_is_passed_to_postprocessor():
-    options = downloader.build_options(bitrate=320)
-    extract = options["postprocessors"][0]
-    assert extract["key"] == "FFmpegExtractAudio"
-    assert extract["preferredquality"] == "320"
+    assert _postprocessor("FFmpegExtractAudio", bitrate=320)["preferredquality"] == "320"
 
 
 def test_noplaylist_is_true_by_default():
@@ -30,12 +35,48 @@ def test_noplaylist_is_false_in_playlist_mode():
 
 def test_postprocessor_order_puts_metadata_and_thumbnail_after_extraction():
     keys = [pp["key"] for pp in downloader.build_options()["postprocessors"]]
-    assert keys == ["FFmpegExtractAudio", "FFmpegMetadata", "EmbedThumbnail"]
+    assert keys == ["MetadataParser", "FFmpegExtractAudio", "FFmpegMetadata", "EmbedThumbnail"]
 
 
-def test_playlist_mode_adds_metadata_parser_first():
+def test_playlist_mode_keeps_the_same_postprocessor_order():
     keys = [pp["key"] for pp in downloader.build_options(playlist=True)["postprocessors"]]
-    assert keys[0] == "MetadataParser"
+    assert keys == ["MetadataParser", "FFmpegExtractAudio", "FFmpegMetadata", "EmbedThumbnail"]
+
+
+def _parser_actions(playlist: bool = False) -> list[tuple[str, str]]:
+    """MetadataParser のアクションを (対象フィールド, 正規表現) の組で返す。"""
+    parser = downloader.build_options(playlist=playlist)["postprocessors"][0]
+    assert parser["key"] == "MetadataParser"
+    assert parser["when"] == "pre_process"
+    return [(action[1], action[2]) for action in parser["actions"]]
+
+
+def test_description_is_blanked_before_metadata_is_written():
+    assert ("description", "(?P<description>)") in _parser_actions()
+
+
+def test_description_is_blanked_in_playlist_mode_too():
+    assert ("description", "(?P<description>)") in _parser_actions(playlist=True)
+
+
+def test_album_is_taken_from_playlist_title_only_in_playlist_mode():
+    assert ("playlist_title", "(?P<album>.+)") in _parser_actions(playlist=True)
+    assert ("playlist_title", "(?P<album>.+)") not in _parser_actions()
+
+
+def test_empty_capture_matches_any_value_and_yields_an_empty_string():
+    """説明文の有無にかかわらず、空文字が代入されることを確かめる。"""
+    import re
+
+    from yt_dlp.postprocessor.metadataparser import MetadataParserPP
+
+    pattern = re.compile(
+        MetadataParserPP.format_to_regex(downloader.EMPTY_CAPTURE.format("description"))
+    )
+    for value in ("長い説明文" * 50, "", "NA"):
+        match = pattern.search(value)
+        assert match is not None
+        assert match.groupdict() == {"description": ""}
 
 
 def test_retry_settings_are_present():
