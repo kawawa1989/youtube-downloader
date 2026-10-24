@@ -478,3 +478,67 @@ def test_entry_index_prefers_the_playlist_index():
     assert downloader._entry_index({"playlist_index": 7}, 1) == 7
     assert downloader._entry_index({}, 4) == 4
     assert downloader._entry_index({"playlist_index": None}, 2) == 2
+
+
+# --- プレイリスト専用 URL のガード -------------------------------------------
+
+
+PLAYLIST_ENTRY = {
+    "id": "abc123",
+    "ext": "webm",
+    "title": "曲",
+    "playlist": "リスト",
+    "playlist_id": "PL123",
+    "playlist_count": 3,
+    "playlist_index": 1,
+}
+
+
+def test_playlist_markers_are_detected():
+    assert downloader._is_playlist_entry(PLAYLIST_ENTRY) is True
+
+
+def test_a_standalone_video_is_not_a_playlist_entry():
+    assert downloader._is_playlist_entry({"id": "x", "title": "曲"}) is False
+
+
+def test_playlist_index_alone_does_not_trigger_the_guard():
+    """`--playlist` 指定時に自前で番号を補う場合に誤検知しないことの確認。"""
+    assert downloader._is_playlist_entry({"playlist_index": 2}) is False
+
+
+def test_guard_cancels_a_playlist_entry_without_the_playlist_flag(tmp_path):
+    from yt_dlp.utils import DownloadCancelled
+
+    planner = _make_planner(tmp_path)
+    with pytest.raises(DownloadCancelled):
+        planner.match_filter(dict(PLAYLIST_ENTRY))
+    assert planner.cancelled == downloader.PLAYLIST_GUARD_SUMMARY
+    assert planner.results() == []
+
+
+def test_guard_stays_out_of_the_way_in_playlist_mode(tmp_path):
+    planner = _make_planner(tmp_path, playlist=True)
+    assert planner.match_filter(dict(PLAYLIST_ENTRY)) is None
+    assert planner.cancelled is None
+    assert len(planner.results()) == 1
+
+
+def test_guard_does_not_fire_for_a_standalone_video(tmp_path):
+    planner = _make_planner(tmp_path)
+    assert planner.match_filter(dict(ENTRY)) is None
+    assert planner.cancelled is None
+
+
+def test_guard_defers_while_information_is_incomplete(tmp_path):
+    planner = _make_planner(tmp_path)
+    assert planner.match_filter(dict(PLAYLIST_ENTRY), incomplete=True) is None
+    assert planner.cancelled is None
+
+
+def test_guard_message_names_the_flag_to_use():
+    error = downloader.YtmpError(
+        downloader.PLAYLIST_GUARD_SUMMARY, "https://x/list", hint=downloader.PLAYLIST_GUARD_HINT
+    )
+    assert "--playlist" in error.describe()
+    assert "https://x/list" in error.describe()
