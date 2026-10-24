@@ -359,3 +359,122 @@ def test_failed_urls_file_can_be_fed_back(tmp_path):
     out = tmp_path / "failed.txt"
     cli._write_failed_urls(summary, str(out))
     assert cli.read_url_file(str(out)) == ["https://x/1", "https://x/2"]
+
+
+# --- 取得前の計画（_Planner） -----------------------------------------------
+
+
+def _make_planner(tmp_path, playlist=False, force=False, claimed=None):
+    """テスト用に、prepare_filename が使える状態の _Planner を組み立てる。"""
+    import yt_dlp
+
+    outdir = str(tmp_path)
+    planner = downloader._Planner(
+        outdir, playlist, force, set() if claimed is None else claimed
+    )
+    planner.ydl = yt_dlp.YoutubeDL(
+        {"quiet": True, "no_warnings": True, "outtmpl": downloader._temp_outtmpl(outdir)}
+    )
+    return planner
+
+
+ENTRY = {"id": "abc123", "ext": "webm", "title": "曲"}
+
+
+def test_temp_outtmpl_escapes_percent_in_the_output_directory():
+    assert downloader._temp_outtmpl("/tmp/100%_music") == os.path.join(
+        "/tmp/100%%_music", downloader.TEMP_OUTTMPL
+    )
+
+
+@pytest.mark.parametrize("incomplete", [True, {"ext", "url"}])
+def test_planner_defers_while_information_is_incomplete(tmp_path, incomplete):
+    planner = _make_planner(tmp_path)
+    assert planner.match_filter(dict(ENTRY), incomplete=incomplete) is None
+    assert planner.results() == []
+
+
+def test_planner_plans_each_video_only_once(tmp_path):
+    claimed: set[str] = set()
+    planner = _make_planner(tmp_path, claimed=claimed)
+    planner.match_filter(dict(ENTRY))
+    planner.match_filter(dict(ENTRY))
+    assert len(claimed) == 1
+    assert len(planner.results()) == 1
+
+
+def test_planner_lets_a_new_video_through(tmp_path):
+    planner = _make_planner(tmp_path)
+    assert planner.match_filter(dict(ENTRY)) is None
+    assert planner.results() == [
+        downloader.TrackResult(title="曲", path=str(tmp_path / "曲.mp3"), skipped=False)
+    ]
+
+
+def test_planner_skips_an_already_downloaded_file(tmp_path):
+    (tmp_path / "曲.mp3").write_bytes(b"xyz")
+    planner = _make_planner(tmp_path)
+    assert planner.match_filter(dict(ENTRY)) is not None
+    assert planner.results()[0].skipped is True
+
+
+def test_planner_ignores_an_empty_file(tmp_path):
+    (tmp_path / "曲.mp3").write_bytes(b"")
+    planner = _make_planner(tmp_path)
+    assert planner.match_filter(dict(ENTRY)) is None
+    assert planner.results()[0].skipped is False
+
+
+def test_planner_does_not_skip_when_forced(tmp_path):
+    (tmp_path / "曲.mp3").write_bytes(b"xyz")
+    planner = _make_planner(tmp_path, force=True)
+    assert planner.match_filter(dict(ENTRY)) is None
+    assert planner.results()[0].skipped is False
+
+
+def test_planner_numbers_a_colliding_title(tmp_path):
+    claimed: set[str] = set()
+    planner = _make_planner(tmp_path, claimed=claimed)
+    planner.match_filter({"id": "one", "ext": "webm", "title": "同名"})
+    planner.match_filter({"id": "two", "ext": "webm", "title": "同名"})
+    assert [os.path.basename(r.path) for r in planner.results()] == [
+        "同名.mp3",
+        "同名 (2).mp3",
+    ]
+
+
+def test_planner_uses_playlist_subdirectory_and_index(tmp_path):
+    planner = _make_planner(tmp_path, playlist=True)
+    planner.match_filter(
+        {"id": "x", "ext": "webm", "title": "曲", "playlist_title": "リスト", "playlist_index": 3}
+    )
+    assert planner.results()[0].path == str(tmp_path / "リスト" / "03 - 曲.mp3")
+
+
+def test_planner_moves_the_produced_file_into_place(tmp_path):
+    planner = _make_planner(tmp_path, playlist=True)
+    planner.match_filter(
+        {"id": "abc123", "ext": "webm", "title": "曲", "playlist_title": "リスト", "playlist_index": 1}
+    )
+    produced = tmp_path / "abc123.mp3"
+    produced.write_bytes(b"audio")
+
+    planner.on_file_done(str(produced))
+
+    final = tmp_path / "リスト" / "01 - 曲.mp3"
+    assert final.read_bytes() == b"audio"
+    assert not produced.exists()
+
+
+def test_planner_leaves_unplanned_files_alone(tmp_path):
+    planner = _make_planner(tmp_path)
+    stray = tmp_path / "無関係.mp3"
+    stray.write_bytes(b"keep")
+    planner.on_file_done(str(stray))
+    assert stray.read_bytes() == b"keep"
+
+
+def test_entry_index_prefers_the_playlist_index():
+    assert downloader._entry_index({"playlist_index": 7}, 1) == 7
+    assert downloader._entry_index({}, 4) == 4
+    assert downloader._entry_index({"playlist_index": None}, 2) == 2
