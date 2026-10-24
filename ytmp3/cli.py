@@ -13,6 +13,8 @@ from ytmp3.downloader import (
     BITRATE_CHOICES,
     DEFAULT_BITRATE,
     DEFAULT_OUTDIR,
+    PLAYLIST_GUARD_HINT,
+    PLAYLIST_GUARD_SUMMARY,
     YtmpError,
     classify_error,
     cleanup_partials,
@@ -211,6 +213,11 @@ def _run_dry_run(urls: list[str], outdir: str, args: argparse.Namespace) -> int:
         except Exception as exc:
             _warn(classify_error(exc, url).describe())
             continue
+        if not args.playlist and len(items) > 1:
+            # プレイリストでない URL は必ず1件になるため、2件以上あれば
+            # プレイリストとして展開されている。取得時は中断する旨を知らせる。
+            _warn(f"{PLAYLIST_GUARD_SUMMARY}: {url}")
+            _warn(f"  {PLAYLIST_GUARD_HINT}")
         for item in items:
             print(f"{item.title}  [{format_duration(item.duration)}]")
             print(f"  -> {item.path}")

@@ -35,7 +35,7 @@ python -m ytmp3 "https://www.youtube.com/watch?v=..."
 # 音質と保存先を指定する
 python -m ytmp3 "<URL>" -b 320 -o ~/Music/mp3
 
-# プレイリスト全体を取得する（既定は単一動画のみ）
+# プレイリストを取得する（--playlist が無いと中断する）
 python -m ytmp3 "<プレイリストURL>" --playlist
 
 # URL をファイルから一括処理する
@@ -59,7 +59,7 @@ python -m ytmp3 -f failed.txt
 | `url` | — | ダウンロードする動画の URL（`-f` と併用可） |
 | `-o`, `--output DIR` | `downloads` | mp3 の保存先。`~` を展開し、無ければ作成する |
 | `-b`, `--bitrate` | `192` | ビットレート(kbps)。`128` / `192` / `256` / `320` |
-| `--playlist` / `--no-playlist` | `--no-playlist` | プレイリスト全体を処理するか |
+| `--playlist` / `--no-playlist` | `--no-playlist` | プレイリスト全体を処理するか。無指定でプレイリストを渡すと中断する |
 | `-f`, `--file FILE` | — | URL を列挙したテキストファイル |
 | `--dry-run` | 無効 | 取得予定の一覧だけ表示し、何も保存しない |
 | `--force` | 無効 | 既存の同名ファイルを上書きする |
@@ -69,6 +69,9 @@ python -m ytmp3 -f failed.txt
 
 ## 動作の約束事
 
+- **プレイリスト**: `--playlist` を付けずにプレイリストの URL を渡すと、**何も保存せずに中断**し、
+  `--playlist` を促します。数百件を意図せず取得する事故を防ぐためです。
+  `watch?v=...&list=...` のように動画が特定できる URL では、従来どおりその動画1本だけを取得します。
 - **保存先**: 指定しなければプロジェクト直下の `downloads/` に保存します。
   このディレクトリの中身は git の追跡対象外です。
 - **ファイル名**: 動画タイトルをそのまま使います。macOS で扱いづらい `/` と `:` は全角へ置換し、

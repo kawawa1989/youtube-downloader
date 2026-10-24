@@ -38,6 +38,16 @@ STALE_AFTER_DAYS = 180
 # FFmpegMetadata は値が空のフィールドをタグへ書き込まない。
 EMPTY_CAPTURE = "(?P<{}>)"
 
+# プレイリストとして展開された結果であることを示すフィールド。
+# yt-dlp はプレイリストの各要素にこれらを付ける。単独の動画には付かない。
+PLAYLIST_MARKERS = ("playlist", "playlist_id", "playlist_count")
+
+# --playlist を付けずにプレイリストを渡したときの案内。
+# noplaylist は watch?v=X&list=Y のように動画が特定できる URL でしか効かず、
+# プレイリスト専用 URL では全件が対象になってしまうため、こちらで止める。
+PLAYLIST_GUARD_SUMMARY = "プレイリストの URL です"
+PLAYLIST_GUARD_HINT = "全件取得するには --playlist を付けてください"
+
 # 取得時の一時的な保存名。動画 ID を使い、取得後に確定済みのパスへ移す。
 # ファイル名の正規化と重複判定を取得前に済ませるため、yt-dlp には
 # 衝突しない名前で書き出させ、最終的な名前はこちらで決める。
@@ -167,6 +177,9 @@ class _Planner:
         self.force = force
         self.claimed = claimed
         self.ydl: yt_dlp.YoutubeDL | None = None
+        # ガードで中断した理由。yt-dlp は送出した例外を引数なしのものへ
+        # 差し替えてしまい、メッセージが失われるため、ここに控える。
+        self.cancelled: str | None = None
         self._plans: dict[str, _Plan] = {}
         self._order: list[str] = []
 
@@ -178,6 +191,12 @@ class _Planner:
         """
         if incomplete:
             return None
+
+        if not self.playlist and _is_playlist_entry(info):
+            # 1件も取得しないまま中断する。どの動画が選ばれたか分からない
+            # 状態で1件だけ取るより、明示を促したほうが安全。
+            self.cancelled = PLAYLIST_GUARD_SUMMARY
+            raise yt_dlp.utils.DownloadCancelled(PLAYLIST_GUARD_SUMMARY)
 
         plan = self._plan(info)
         if plan.skipped:
@@ -306,6 +325,9 @@ def build_options(
         "format": "bestaudio/best",
         "noplaylist": not playlist,
         "writethumbnail": True,
+        # プレイリスト自身のサムネイルや infojson は出力先に残さない。
+        # 既定では <プレイリストID>.jpg が書き出されてしまう。
+        "allow_playlist_files": False,
         "postprocessors": postprocessors,
         "retries": RETRIES,
         "fragment_retries": RETRIES,
@@ -356,6 +378,8 @@ def download(
             planner.ydl = ydl
             ydl.extract_info(url, download=True)
     except Exception as exc:
+        if planner.cancelled is not None:
+            raise YtmpError(planner.cancelled, url, hint=PLAYLIST_GUARD_HINT) from exc
         raise classify_error(exc, url) from exc
 
     return planner.results()
@@ -487,6 +511,11 @@ def _probe(url: str, playlist: bool, quiet: bool) -> list[dict[str, Any]]:
     }
     with yt_dlp.YoutubeDL(options) as ydl:
         return _iter_entries(ydl.extract_info(url, download=False))
+
+
+def _is_playlist_entry(info: dict[str, Any]) -> bool:
+    """プレイリストとして展開された結果の1件かどうか。"""
+    return any(info.get(key) is not None for key in PLAYLIST_MARKERS)
 
 
 def _temp_outtmpl(outdir: str) -> str:
