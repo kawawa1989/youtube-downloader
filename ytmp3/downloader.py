@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 import yt_dlp
+from yt_dlp.postprocessor import MetadataParserPP
 
 DEFAULT_OUTDIR = "downloads"
 DEFAULT_BITRATE = 192
@@ -32,6 +33,10 @@ SOCKET_TIMEOUT = 30
 
 # これより古い yt-dlp は、YouTube 側の変更に追従できていない可能性がある
 STALE_AFTER_DAYS = 180
+
+# MetadataParser で情報を空にするための、空文字をキャプチャする正規表現。
+# FFmpegMetadata は値が空のフィールドをタグへ書き込まない。
+EMPTY_CAPTURE = "(?P<{}>)"
 
 UPDATE_HINT = "yt-dlp の更新が必要かもしれません: pip install -U yt-dlp"
 
@@ -180,7 +185,20 @@ def build_options(
 
     outtmpl は呼び出し元が確定済みのパスで上書きする前提のため、ここでは設定しない。
     """
+    # FFmpegMetadata が読む前に info を書き換えるアクション
+    parser_actions: list[tuple[Any, ...]] = [
+        # 動画説明文は全文が description / synopsis タグに入ってしまうため、
+        # 空にして FFmpegMetadata に書き込ませない
+        (MetadataParserPP.interpretter, "description", EMPTY_CAPTURE.format("description")),
+    ]
+    if playlist:
+        # album が無い動画では、プレイリスト名をアルバム名として扱う
+        parser_actions.append(
+            (MetadataParserPP.interpretter, "playlist_title", "(?P<album>.+)")
+        )
+
     postprocessors: list[dict[str, Any]] = [
+        {"key": "MetadataParser", "when": "pre_process", "actions": parser_actions},
         {
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -189,21 +207,6 @@ def build_options(
         {"key": "FFmpegMetadata", "add_metadata": True},
         {"key": "EmbedThumbnail", "already_have_thumbnail": False},
     ]
-
-    if playlist:
-        # album が無い動画では、プレイリスト名をアルバム名として扱う
-        from yt_dlp.postprocessor import MetadataParserPP
-
-        postprocessors.insert(
-            0,
-            {
-                "key": "MetadataParser",
-                "when": "pre_process",
-                "actions": [
-                    (MetadataParserPP.interpretter, "playlist_title", "(?P<album>.+)"),
-                ],
-            },
-        )
 
     options: dict[str, Any] = {
         "format": "bestaudio/best",
