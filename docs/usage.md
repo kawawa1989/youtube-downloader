@@ -43,6 +43,19 @@ python -m ytmp3 "<URL>"
 
 作業が終わったら `deactivate` で仮想環境を抜けます。
 
+> [!IMPORTANT]
+> **macOS には素の `python` コマンドがありません。** Homebrew の Python も `python3` しか
+> 入れないため、`python` が使えるのは仮想環境を有効化したあとだけです。有効化せずに
+> 実行すると `command not found: python` になります。
+>
+> 有効化が面倒な場合は、仮想環境の python を直接指定しても同じです。この場合は
+> 有効化は不要ですが、プロジェクトルートにいる必要があります。
+>
+> ```bash
+> cd ~/Projects/youtube-downloader
+> .venv/bin/python -m ytmp3 "<URL>"
+> ```
+
 > URL は必ずダブルクォートで囲んでください。YouTube の URL には `&` が含まれることがあり、
 > 囲まないとシェルがそこでコマンドを切ってしまいます。
 
@@ -239,6 +252,14 @@ brew install deno
 ```bash
 brew install ffmpeg
 ```
+
+### `command not found: python` と出る
+
+仮想環境を有効化していません。`source .venv/bin/activate` を実行してください。
+
+`python3` に書き換えても動きません。依存の yt-dlp は仮想環境の中にしか入っていないため、
+`No module named 'yt_dlp'` になります。有効化せずに実行する場合は
+`.venv/bin/python -m ytmp3 ...` と直接指定します。
 
 ### `No module named ytmp3` と出る
 
