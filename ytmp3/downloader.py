@@ -38,6 +38,11 @@ STALE_AFTER_DAYS = 180
 # FFmpegMetadata は値が空のフィールドをタグへ書き込まない。
 EMPTY_CAPTURE = "(?P<{}>)"
 
+# 取得時の一時的な保存名。動画 ID を使い、取得後に確定済みのパスへ移す。
+# ファイル名の正規化と重複判定を取得前に済ませるため、yt-dlp には
+# 衝突しない名前で書き出させ、最終的な名前はこちらで決める。
+TEMP_OUTTMPL = "%(id)s.%(ext)s"
+
 # プレイリスト時の album の決め方。outtmpl の代替指定で album を優先し、
 # album を持つ動画の値は保つ。どちらも無い場合は末尾の | で空文字になるため、
 # 代入側の正規表現が一致せず info は書き換えられない。
@@ -136,6 +141,90 @@ class TrackResult:
     title: str
     path: str
     skipped: bool
+
+
+@dataclass
+class _Plan:
+    """取得前に確定した、1件分の保存計画。"""
+
+    title: str
+    target: str
+    stem: str
+    skipped: bool
+
+
+class _Planner:
+    """取得前に保存先を確定し、取得済みのものを除外する。
+
+    yt-dlp の match_filter として呼ばれる。情報が揃った時点で保存先を決め、
+    既に取得済みであれば除外理由を返すことで、ダウンロードそのものを省く。
+    生成されたファイルは post_hooks 経由で確定済みのパスへ移す。
+    """
+
+    def __init__(self, outdir: str, playlist: bool, force: bool, claimed: set[str]):
+        self.outdir = outdir
+        self.playlist = playlist
+        self.force = force
+        self.claimed = claimed
+        self.ydl: yt_dlp.YoutubeDL | None = None
+        self._plans: dict[str, _Plan] = {}
+        self._order: list[str] = []
+
+    def match_filter(self, info: dict[str, Any], *, incomplete: Any = False) -> str | None:
+        """1件ごとに yt-dlp から呼ばれる。除外する場合は理由を返す。
+
+        incomplete は真偽値のほか、欠けているフィールドの集合で渡される。
+        情報が揃っていない段階では判断を保留する。
+        """
+        if incomplete:
+            return None
+
+        plan = self._plan(info)
+        if plan.skipped:
+            return f"already downloaded: {plan.target}"
+        return None
+
+    def on_file_done(self, filename: str) -> None:
+        """post_hooks から呼ばれる。一時名の生成物を確定済みのパスへ移す。"""
+        plan = self._plans.get(os.path.splitext(os.path.basename(filename))[0])
+        if plan is None:  # 計画に無いファイルには触らない
+            return
+        os.makedirs(os.path.dirname(plan.target) or ".", exist_ok=True)
+        os.replace(filename, plan.target)
+
+    def results(self) -> list[TrackResult]:
+        """確定した順に処理結果を返す。"""
+        return [
+            TrackResult(
+                title=self._plans[stem].title,
+                path=self._plans[stem].target,
+                skipped=self._plans[stem].skipped,
+            )
+            for stem in self._order
+        ]
+
+    def _plan(self, info: dict[str, Any]) -> _Plan:
+        """1件分の保存先を決める。同じ動画について二度は決めない。"""
+        assert self.ydl is not None, "ydl を設定してから使うこと"
+
+        # yt-dlp が一時名として実際に使うファイル名。これを突き合わせの鍵にする。
+        stem = os.path.splitext(os.path.basename(self.ydl.prepare_filename(info)))[0]
+        if stem in self._plans:
+            return self._plans[stem]
+
+        index = _entry_index(info, len(self._order) + 1)
+        target = _target_path(info, self.outdir, self.playlist, index, self.claimed)
+        self.claimed.add(target)
+
+        plan = _Plan(
+            title=info.get("title") or info.get("id") or "(タイトル不明)",
+            target=target,
+            stem=stem,
+            skipped=not self.force and _already_downloaded(target),
+        )
+        self._plans[stem] = plan
+        self._order.append(stem)
+        return plan
 
 
 class _Logger:
@@ -248,34 +337,28 @@ def download(
     タイトルが重複しても連番で別ファイルとして保存できる。
 
     失敗時は分類済みの YtmpError を送出する。
+
+    取得は URL あたり extract_info 1回で済ませる。保存先は match_filter の
+    段階で確定し、生成物は post_hooks で確定済みのパスへ移す。
     """
     os.makedirs(outdir, exist_ok=True)
-    results = []
     if claimed is None:
         claimed = set()
 
+    planner = _Planner(outdir, playlist, force, claimed)
+    options = build_options(bitrate, playlist, hooks, quiet)
+    options["outtmpl"] = _temp_outtmpl(outdir)
+    options["match_filter"] = planner.match_filter
+    options["post_hooks"] = [planner.on_file_done]
+
     try:
-        entries = _probe(url, playlist, quiet)
+        with yt_dlp.YoutubeDL(options) as ydl:
+            planner.ydl = ydl
+            ydl.extract_info(url, download=True)
     except Exception as exc:
         raise classify_error(exc, url) from exc
 
-    for index, entry in enumerate(entries, start=1):
-        target = _target_path(entry, outdir, playlist, index, claimed)
-        claimed.add(target)
-        title = entry.get("title") or entry.get("id") or "(タイトル不明)"
-
-        if not force and _already_downloaded(target):
-            results.append(TrackResult(title=title, path=target, skipped=True))
-            continue
-
-        entry_url = entry.get("webpage_url") or entry.get("original_url") or url
-        try:
-            _download_one(entry_url, target, bitrate, playlist, hooks, quiet)
-        except Exception as exc:
-            raise classify_error(exc, entry_url) from exc
-        results.append(TrackResult(title=title, path=target, skipped=False))
-
-    return results
+    return planner.results()
 
 
 def preview(
@@ -300,7 +383,9 @@ def preview(
         raise classify_error(exc, url) from exc
 
     for index, entry in enumerate(entries, start=1):
-        target = _target_path(entry, outdir, playlist, index, claimed)
+        target = _target_path(
+            entry, outdir, playlist, _entry_index(entry, index), claimed
+        )
         claimed.add(target)
         items.append(
             PreviewItem(
@@ -404,22 +489,22 @@ def _probe(url: str, playlist: bool, quiet: bool) -> list[dict[str, Any]]:
         return _iter_entries(ydl.extract_info(url, download=False))
 
 
-def _download_one(
-    url: str,
-    target: str,
-    bitrate: int,
-    playlist: bool,
-    hooks: dict[str, list[Callable[[dict], None]]] | None,
-    quiet: bool,
-) -> None:
-    """1件を、確定済みのパスへダウンロードする。"""
-    options = build_options(bitrate, playlist, hooks, quiet)
-    base, _ = os.path.splitext(target)
-    # outtmpl 内では % が書式指定の開始として解釈されるため退避する
-    options["outtmpl"] = base.replace("%", "%%") + ".%(ext)s"
+def _temp_outtmpl(outdir: str) -> str:
+    """取得時に使う一時的な outtmpl を組み立てる。
 
-    with yt_dlp.YoutubeDL(options) as ydl:
-        ydl.download([url])
+    outtmpl 内では % が書式指定の開始として解釈されるため、
+    出力先のパスに含まれる % を退避する。
+    """
+    return os.path.join(outdir.replace("%", "%%"), TEMP_OUTTMPL)
+
+
+def _entry_index(entry: dict[str, Any], fallback: int) -> int:
+    """プレイリスト内の位置を返す。yt-dlp が付けた番号を優先する。
+
+    preview() と download() で同じ番号を使うことで、--dry-run が示す
+    予定パスと実際の保存先が一致する。
+    """
+    return entry.get("playlist_index") or fallback
 
 
 def _target_path(
