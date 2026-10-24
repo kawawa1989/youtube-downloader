@@ -8,7 +8,7 @@ YouTube 動画の音声を mp3 として保存する CLI ツールです。
 - Python 3.10 以上（開発と動作確認は 3.15 で実施）
 - ffmpeg（mp3 への変換に必須）
 
-## セットアップ
+## セットアップ（初回だけ）
 
 ```bash
 # ffmpeg を導入する
@@ -20,9 +20,34 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## 実行の準備（毎回）
+
+ターミナルを開くたびに、プロジェクトルートで仮想環境を有効化します。
+
+```bash
+cd ~/Projects/youtube-downloader
+source .venv/bin/activate
+```
+
+プロンプトに `(.venv)` が付けば有効です。これ以降 `python` コマンドが使えます。
+終わったら `deactivate` で抜けます。
+
+> [!IMPORTANT]
+> **macOS には素の `python` コマンドがありません。** Homebrew の Python も `python3` しか
+> 入れないため、`python` が使えるのは仮想環境を有効化したあとだけです。有効化せずに
+> 実行すると `command not found: python` になります。
+>
+> 有効化したくない場合は、仮想環境の python を直接指定しても同じです。
+>
+> ```bash
+> cd ~/Projects/youtube-downloader
+> .venv/bin/python -m ytmp3 --help
+> ```
+
 ## 使い方
 
 手順を順に追った詳しい説明は [docs/usage.md](docs/usage.md) にあります。
+以下の例は、上記の「実行の準備」を済ませた状態を前提にしています。
 
 **プロジェクトルートから実行してください。** 別のディレクトリからは
 `No module named ytmp3` になります。また URL は `&` を含むことがあるため、
@@ -100,6 +125,10 @@ pytest
   JavaScript ランタイムを使うようになったためです。警告だけで動作しますが、一部のフォーマットが
   取得できない場合があります。解消するには `brew install deno` を実行してください。
 - **`ffmpeg が見つかりません`**: `brew install ffmpeg` を実行してください。
+- **`command not found: python`**: 仮想環境を有効化していません。
+  `source .venv/bin/activate` を実行するか、`.venv/bin/python -m ytmp3 ...` と直接指定してください。
+  macOS には素の `python` がないため、`python3` と書き換えても動きません。依存の yt-dlp は
+  仮想環境の中にしか入っていないため、`No module named 'yt_dlp'` になります。
 - **`No module named ytmp3`**: プロジェクトルート以外から実行しています。
 - **途中で中断した**: `Ctrl+C` で止めた場合、`.part` などの一時ファイルは自動的に削除されます。
 
